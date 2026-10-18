@@ -1,6 +1,6 @@
 # 라이선스 및 음원 출처
 
-대상: 메시지 알림음 조절 플러그인 v1.36.0
+대상: 메시지 알림음 조절 플러그인 v1.37.0
 
 ## 플러그인 코드
 
@@ -26,7 +26,7 @@ CC0 조건: https://creativecommons.org/publicdomain/zero/1.0/
 | 사용 항목 | 원본 / 제작자 | 출처 |
 | --- | --- | --- |
 | 도장 · 짧게 찍기 | es-stamp.wav / eddies2000 | https://freesound.org/people/eddies2000/sounds/448474/ |
-| 스위치 · 딸깍 및 ON/OFF 조작음 | light_switch10 / funkysandwich | https://freesound.org/people/funkysandwich/sounds/870289/ |
+| 스위치 · 딸깍 | light_switch10 / funkysandwich | https://freesound.org/people/funkysandwich/sounds/870289/ |
 | 타자 · 세 번 / 두 번 | Keyboard Soundpack #1 [Typing and Single Keystrokes] / unicaegames | https://opengameart.org/content/keyboard-soundpack-1-typing-and-single-keystrokes |
 | 종이 · 앞으로 넘기기 | Flipping Page Forward / Ym_The_Cosmic | https://freesound.org/people/Ym_The_Cosmic/sounds/858468/ |
 | 필기 · 펜 | Writing on paper / AkiYaSuShi | https://freesound.org/people/AkiYaSuShi/sounds/830323/ |
@@ -34,7 +34,7 @@ CC0 조건: https://creativecommons.org/publicdomain/zero/1.0/
 ### 편집 내용
 
 - 도장: 짧은 구간 추출, 레벨 조정, 끝부분 페이드.
-- 스위치: 레벨 조정 및 기존 끝부분 페이드 유지. 꺼짐음은 두 반음 낮게 재생. 알림음은 꺼짐음과 켜짐음을 100ms 간격으로 연결. ON/OFF 조작음과 알림음의 음량은 별도 설정.
+- 스위치: 레벨 조정 및 기존 끝부분 페이드 유지. 꺼짐음은 두 반음 낮게 재생. 알림음은 꺼짐음과 켜짐음을 100ms 간격으로 연결.
 - 타자: `keypress-001.wav`, `keypress-007.wav`, `keypress-014.wav`를 사용해 두 번/세 번 입력 배열 구성, 레벨 및 끝부분 처리.
 - 종이: 고음 완화, 약한 구간의 배경 잡음 감소, 레벨 조정 및 끝부분 페이드. 원본 길이와 피치 유지.
 - 필기: 원본 앞 1.6초 사용, 배경 잡음 감소, 고음 완화, 레벨 조정 및 끝 0.8초 페이드.
@@ -50,3 +50,9 @@ Freesound 음원은 공개 HQ MP3 미리듣기 파일을 가공했습니다. 로
 ## Update distribution
 
 Version 1.36.0 adds the update URL https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js. All audio and playback behavior unchanged.
+
+Version 1.36.1 adds an SVG ellipsis busy state to the preview button during activation/decoding and restores it on success or failure. No sound or licensing changes.
+
+Version 1.36.2 silently preloads only the currently selected alert and enable-switch click after successful audio activation, using one deferred idle job (with a one-shot timer fallback). Selection changes coalesce; custom audio is normalized and cached; switch notification and control share a decoded buffer. Warmup never plays audio, does not block the chat listener or disable preview, and failures remain retryable. Audio bytes, gains, pitch, fades, and license terms unchanged.
+
+Version 1.37.0 removes enable-switch control audio and all preloading. Only one selected decoded audio buffer is cached, invalidated on selection changes. Switch notification stays available, with the same two-click pitch/gain/gap. Background recordings, audio bytes, and licenses unchanged. Native decoding and upload validation may temporarily allocate additional memory while processing; embedded compressed audio strings remain available for the preset list.
