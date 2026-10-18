@@ -1,6 +1,6 @@
 # 라이선스 및 음원 출처
 
-대상: 메시지 알림음 조절 플러그인 v1.45.1
+대상: 메시지 알림음 조절 플러그인 v1.45.2
 
 ## 플러그인 코드
 
@@ -48,10 +48,12 @@ UI 아이콘은 플러그인 코드에 직접 작성한 인라인 SVG이며, 코
 
 ## 배포 및 업데이트
 
-현재 버전: v1.45.1. 사용자 음원 업로드·삭제·저장·정규화 기능을 제거했습니다. 기본 제공 음원의 데이터·재생 음량·피치·페이드는 유지합니다.
+현재 버전: v1.45.2. 사용자 음원 업로드·삭제·저장·정규화 기능을 제거했습니다. 재생 음량·피치·길이는 유지하며, 종이 음원 뒷부분의 잡음 제거를 추가했습니다.
 
 업데이트 주소: https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 
-Version 1.45.1 reads embedded 16-bit PCM WAV recordings directly into AudioBuffers, avoiding decodeAudioData for these files. Original encoded audio bytes/gains and pitch/sequence settings unchanged. Buffers retain source sample rate; Web Audio resamples during playback if needed, rather than pre-resampling in decodeAudioData. PCM samples were compared against libsndfile references (maximum difference 1e-7, including runtime fades). The RisuAI MP3 retains native decoding. Actual hardware output is not claimed bit-identical or verified lag-free.
+Version 1.45.2 reads embedded 16-bit PCM WAV recordings directly into AudioBuffers, avoiding decodeAudioData for these files. Original encoded audio bytes/gains and pitch/sequence settings unchanged. Buffers retain source sample rate; Web Audio resamples during playback if needed, rather than pre-resampling in decodeAudioData. PCM samples were compared against libsndfile references (maximum difference 1e-7, including runtime fades). The RisuAI MP3 retains native decoding. Actual hardware output is not claimed bit-identical or verified lag-free.
 
-현재 UI는 펼친 알림음 목록에서 항목을 누르면 선택·저장하고 미리듣기를 재생합니다. 별도 재생 버튼과 알림음 사용 ON/OFF는 없으며, 음량 0%로 음소거합니다. 재생 진단은 기본 접힘 상태입니다. 음원 데이터와 음량·피치·페이드 설정은 유지했습니다.
+현재 UI는 펼친 알림음 목록에서 항목을 누르면 선택·저장하고 미리듣기를 재생합니다. 별도 재생 버튼과 알림음 사용 ON/OFF는 없으며, 음량 0%로 음소거합니다. 재생 진단은 기본 접힘 상태입니다. UI 개편 시 음원 설정은 유지했으며, v1.45.2에서는 아래와 같이 종이 음원만 추가 편집했습니다.
+
+v1.45.2: 종이 알림음의 앞 0.5초는 유지하고, 0.5–0.75초 구간부터 추가 잡음 제거를 서서히 적용했습니다. 길이·피치·재생 음량과 나머지 음원은 유지했습니다.
