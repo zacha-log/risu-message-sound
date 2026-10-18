@@ -1,13 +1,14 @@
 //@name risu_message_sound
 //@api 3.0
-//@version 1.35.9
+//@version 1.36.0
+//@update-url https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 //@display-name 메시지 알림음 조절
 
 // Code SPDX-License-Identifier: GPL-3.0-only
 // Contains RisuAI src/etc/send.mp3 from commit 1db1199eef3575af9b52e8a85e83e3d333488933.
 // RisuAI copyright (C) 2024 Kwaroran; see accompanying LICENSE and CREDITS.md.
 // Modified 2026-10-16: recorded two/three-key presets; toned-down paper recordings; removed fast typing.
-// CC0 recordings: StarNinjas (book pages), unicaegames (human keyboard typing). See CREDITS.md.
+// External recordings: CC0; see CREDITS.md for creators, sources, and the separate RisuAI sound notice.
 // Uses the committed-output listener, never edits prompts or chat messages.
 (async () => {
   const api = Risuai;
@@ -109,7 +110,7 @@
   </style>`);
   document.body.innerHTML = `<main>
     <header>
-      <div><span class="version">SOUND / 1.35.9</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
+      <div><span class="version">SOUND / 1.36.0</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
       ${iconButton('close', 'close', '설정창 닫기')}
     </header>
     <section class="line enabled-row"><label for="enabled">알림음 사용</label><label class="enable-control" for="enabled" aria-label="알림음 사용"><input id="enabled" type="checkbox" role="switch" aria-label="알림음 사용"></label></section>

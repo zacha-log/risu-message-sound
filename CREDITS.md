@@ -1,6 +1,6 @@
 # 라이선스 및 음원 출처
 
-대상: 메시지 알림음 조절 플러그인 v1.35.9
+대상: 메시지 알림음 조절 플러그인 v1.36.0
 
 ## 플러그인 코드
 
@@ -46,3 +46,7 @@ Freesound 음원은 공개 HQ MP3 미리듣기 파일을 가공했습니다. 로
 
 - UI 아이콘은 플러그인 코드에 직접 작성한 인라인 SVG이며, 코드와 같은 GPL-3.0-only로 제공합니다.
 - 사용자가 직접 불러오는 음원은 이 출처 목록에 포함되지 않습니다. 해당 음원의 이용 조건은 사용자가 확인해야 합니다.
+
+## Update distribution
+
+Version 1.36.0 adds the update URL https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js. All audio and playback behavior unchanged.
