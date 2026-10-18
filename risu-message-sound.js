@@ -1,6 +1,6 @@
 //@name risu_message_sound
 //@api 3.0
-//@version 1.36.0
+//@version 1.36.2
 //@update-url https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 //@display-name 메시지 알림음 조절
 
@@ -28,6 +28,7 @@
   builtinAudio.switch_click = toggleAudio;
   let toggleDecode = null;
   let toggleRequest = 0;
+  let preloadJob = null;
   const REFERENCE_VOLUME = 0.1768712095077624;
   const MAX_BYTES = 3 * 1024 * 1024;
   const defaults = { enabled: true, volume: 40, preset: 'risu', fileName: '', fileData: '' };
@@ -50,6 +51,7 @@
   const icons = {
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     play: '<path d="m9 5 11 7-11 7Z"/>',
+    loading: '<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
     upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
     remove: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
     test: '<path d="M12 8v5l3 2M5 5l-2 3M19 5l2 3"/><circle cx="12" cy="13" r="8"/><path d="M9 2h6"/>',
@@ -110,7 +112,7 @@
   </style>`);
   document.body.innerHTML = `<main>
     <header>
-      <div><span class="version">SOUND / 1.36.0</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
+      <div><span class="version">SOUND / 1.36.2</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
       ${iconButton('close', 'close', '설정창 닫기')}
     </header>
     <section class="line enabled-row"><label for="enabled">알림음 사용</label><label class="enable-control" for="enabled" aria-label="알림음 사용"><input id="enabled" type="checkbox" role="switch" aria-label="알림음 사용"></label></section>
@@ -148,6 +150,19 @@
     return elements.get(id);
   };
   let diagnosticText = '';
+  let loadingCount = 0;
+  function previewLoading(loading) {
+    const wasLoading = loadingCount > 0;
+    loadingCount = Math.max(0, loadingCount + (loading ? 1 : -1));
+    const busy = loadingCount > 0;
+    if (disposed || busy === wasLoading) return;
+    const button = $('preview');
+    button.innerHTML = svg(busy ? 'loading' : 'play');
+    button.disabled = busy;
+    button.setAttribute('aria-busy', String(busy));
+    button.setAttribute('aria-label', busy ? '음원 불러오는 중' : '미리듣기 / 소리 활성화');
+    button.title = busy ? '음원 불러오는 중' : '미리듣기 / 소리 활성화';
+  }
   function diagnostics() {
     const text = `완료 신호 연결: ${listenerReady ? '요청 완료 · 수신 횟수 확인' : '미연결'} / 수신 ${outputCount}회 / 최근 수신: ${lastOutput} / 오디오: ${context?.state || '미생성'} / 최근 재생: ${lastResult}`;
     if (text !== diagnosticText) { $('diagnostics').textContent = text; diagnosticText = text; }
@@ -189,6 +204,7 @@
       unlocked = context.state === 'running';
       diagnostics();
       if (!unlocked) throw new Error('자동 재생 차단 · 재생을 눌러 활성화');
+      schedulePreload();
     });
   }
   function activateAutomatically() {
@@ -290,7 +306,9 @@
     }
     return audio;
   }
-  function decodeData(data, normalize = false, fadeMs = 0) {
+  async function decodeData(data, normalize = false, fadeMs = 0, showLoading = true) {
+    if (showLoading) previewLoading(true);
+    try {
     const base64 = data.split(',')[1];
     let bytes;
     if (typeof Uint8Array.fromBase64 === 'function') bytes = Uint8Array.fromBase64(base64);
@@ -299,12 +317,13 @@
       bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     }
-    return context.decodeAudioData(bytes.buffer).then(async audio => {
-      if (disposed) throw new Error('플러그인 종료');
-      return fadeTail(normalize ? await normalizeCustomBuffer(audio) : audio, fadeMs);
-    });
+    const audio = await context.decodeAudioData(bytes.buffer);
+    if (disposed) throw new Error('플러그인 종료');
+    return fadeTail(normalize ? await normalizeCustomBuffer(audio) : audio, fadeMs);
+    } finally { if (showLoading) previewLoading(false); }
   }
-  async function builtinBuffer(preset) {
+  async function builtinBuffer(preset, showLoading = true) {
+    if (preset === 'switch_click') return toggleBuffer(showLoading);
     if (builtinBuffers.has(preset)) {
       const audio = builtinBuffers.get(preset);
       builtinBuffers.delete(preset);
@@ -313,7 +332,7 @@
     }
     if (builtinDecodes.has(preset)) return builtinDecodes.get(preset);
     const fadeMs = preset === 'risu' ? 120 : preset === 'page_forward' ? 180 : 0;
-    const pending = decodeData(builtinAudio[preset], false, fadeMs).then(audio => {
+    const pending = decodeData(builtinAudio[preset], false, fadeMs, showLoading).then(audio => {
       if (!disposed) {
         builtinBuffers.set(preset, audio);
         while (builtinBuffers.size > MAX_CACHED_BUILTINS) builtinBuffers.delete(builtinBuffers.keys().next().value);
@@ -324,15 +343,47 @@
     try { return await pending; }
     finally { if (builtinDecodes.get(preset) === pending) builtinDecodes.delete(preset); }
   }
-  function customBuffer(data) {
+  function customBuffer(data, showLoading = true) {
     if (buffer) return Promise.resolve(buffer);
     if (customDecode?.data === data) return customDecode.promise;
     const request = { data, promise: null };
-    request.promise = decodeData(data, true, 180).finally(() => {
+    request.promise = decodeData(data, true, 180, showLoading).then(audio => {
+      if (!disposed && data === settings.fileData) buffer = audio;
+      return audio;
+    }).finally(() => {
       if (customDecode === request) customDecode = null;
     });
     customDecode = request;
     return request.promise;
+  }
+  function toggleBuffer(showLoading = true) {
+    if (!toggleDecode) {
+      const pending = decodeData(toggleAudio, false, 0, showLoading);
+      toggleDecode = pending;
+      void pending.catch(() => { if (toggleDecode === pending) toggleDecode = null; });
+    }
+    return toggleDecode;
+  }
+  function schedulePreload() {
+    if (disposed || !context || context.state === 'closed' || preloadJob) return;
+    const preset = settings.preset;
+    const selectedReady = preset === 'custom' ? (!settings.fileData || buffer) : preset === 'switch_click' ? toggleDecode : builtinBuffers.has(preset);
+    if (toggleDecode && selectedReady) return;
+    const run = () => {
+      preloadJob = null;
+      if (disposed || !context || context.state === 'closed') return;
+      const selected = settings.preset;
+      // Warm only the selected sound and the short control click, never play them.
+      const jobs = [toggleBuffer(false)];
+      if (selected === 'custom') {
+        if (settings.fileData) jobs.push(customBuffer(settings.fileData, false));
+      } else if (builtinAudio[selected]) jobs.push(builtinBuffer(selected, false));
+      // A failed warmup is retried by the normal playback path.
+      void Promise.allSettled(jobs);
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      preloadJob = { idle: true, id: window.requestIdleCallback(run, { timeout: 500 }) };
+    } else preloadJob = { idle: false, id: setTimeout(run, 0) };
   }
   async function playToggle() {
     const request = ++toggleRequest;
@@ -340,12 +391,7 @@
     // Resume synchronously from the switch gesture, even when disabling alerts.
     await unlock();
     if (disposed || request !== toggleRequest || settings.volume === 0) return;
-    if (!toggleDecode) {
-      const pending = decodeData(toggleAudio);
-      toggleDecode = pending;
-      void pending.catch(() => { if (toggleDecode === pending) toggleDecode = null; });
-    }
-    const audio = await toggleDecode;
+    const audio = await toggleBuffer();
     if (disposed || request !== toggleRequest || settings.volume === 0) return;
     stop();
     const source = context.createBufferSource();
@@ -463,7 +509,7 @@
     const selected = available.findIndex(([value]) => value === settings.preset);
     focusPreset(last ? available.length - 1 : Math.max(0, selected));
   }
-  $('preset').onchange = () => { settings.preset = $('preset').value; renderPreset(); stop(); persist(); };
+  $('preset').onchange = () => { settings.preset = $('preset').value; renderPreset(); stop(); persist(); schedulePreload(); };
   const togglePresetMenu = () => { if (menuOpen) closePresetMenu(true); else openPresetMenu(); };
   $('preset-display').onclick = togglePresetMenu;
   $('preset-trigger').onclick = (event) => { event.stopPropagation(); togglePresetMenu(); };
@@ -494,12 +540,16 @@
   document.addEventListener('pointerdown', (event) => { if (!$('preset-wrap').contains(event.target)) closePresetMenu(); });
   document.addEventListener('focusin', (event) => { if (!$('preset-wrap').contains(event.target)) closePresetMenu(); });
   $('preview').onclick = () => {
+    if (disposed || $('preview').disabled) return;
+    previewLoading(true);
     // Resume before any asynchronous storage or RPC call can consume the user gesture.
     let ready;
-    try { ready = unlock(); } catch (error) { status(errorText(error)); return; }
+    try { ready = unlock(); }
+    catch (error) { previewLoading(false); status(errorText(error)); return; }
     void ready.then(() => play(true)).then(() => {
-      status(settings.volume === 0 ? '음량을 올려 소리 확인' : '활성화 완료 · 답변을 받아 알림 확인');
-    }).catch((error) => status(`재생 실패: ${errorText(error)}`));
+      if (!disposed) status(settings.volume === 0 ? '음량을 올려 소리 확인' : '활성화 완료 · 답변을 받아 알림 확인');
+    }).catch((error) => { if (!disposed) status(`재생 실패: ${errorText(error)}`); })
+      .finally(() => previewLoading(false));
   };
   $('background-test').onclick = () => {
     let ready;
@@ -599,6 +649,11 @@
     disposed = true;
     for (const type of activationEvents) document.removeEventListener(type, activateAutomatically, true);
     if (delayedTest) clearTimeout(delayedTest);
+    if (preloadJob) {
+      if (preloadJob.idle) window.cancelIdleCallback?.(preloadJob.id);
+      else clearTimeout(preloadJob.id);
+      preloadJob = null;
+    }
     stop();
     builtinBuffers.clear();
     builtinDecodes.clear();
