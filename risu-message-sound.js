@@ -1,6 +1,6 @@
 //@name risu_message_sound
 //@api 3.0
-//@version 1.37.0
+//@version 1.45.1
 //@update-url https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 //@display-name 메시지 알림음 조절
 
@@ -24,18 +24,17 @@
   let selectedCache = null;
   let pendingDecode = null;
   let cacheGeneration = 0;
-  const REFERENCE_VOLUME = 0.1768712095077624;
-  const MAX_BYTES = 3 * 1024 * 1024;
-  const defaults = { enabled: true, volume: 40, preset: 'risu', fileName: '', fileData: '' };
+  const defaults = { volume: 40, preset: 'risu' };
   let settings = { ...defaults };
   let context = null;
   let disposed = false;
   let listenerReady = false;
   let startupError = '';
+  let storageReadFailed = false;
   let active = new Set();
   let queue = Promise.resolve();
-  let fileBusy = false;
   let unlocked = false;
+  let activationPending = false;
   let outputCount = 0;
   let lastOutput = '없음';
   let lastResult = '아직 재생하지 않음';
@@ -46,10 +45,7 @@
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     play: '<path d="m9 5 11 7-11 7Z"/>',
     loading: '<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
-    upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
-    remove: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
     test: '<path d="M12 8v5l3 2M5 5l-2 3M19 5l2 3"/><circle cx="12" cy="13" r="8"/><path d="M9 2h6"/>',
-    restore: '<path d="M3 11a9 9 0 1 1 2.5 7M3 4v7h7"/>',
     down: '<path d="m7 10 5 5 5-5"/>'
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true" focusable="false">${icons[name]}</svg>`;
@@ -58,85 +54,74 @@
     ['risu'].map(key => [key, builtinNames[key]]),
     ['stamp_candidate_b', 'switch_click'].map(key => [key, builtinNames[key]]),
     ['typing', 'typing_light'].map(key => [key, builtinNames[key]]),
-    ['page_forward', 'pen_writing'].map(key => [key, builtinNames[key]]),
-    [['custom', '내 음원 파일']]
+    ['page_forward', 'pen_writing'].map(key => [key, builtinNames[key]])
   ];
   const presetItems = presetGroups.flat();
   const availablePresetItems = () => presetItems;
   document.documentElement.lang = 'ko';
   document.head.insertAdjacentHTML('beforeend', `<style>
-    :root{color-scheme:dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e5e5e5;background:#191919;--line:#414141;--accent:#b8c9b0}
-    *{box-sizing:border-box;border-radius:0}body{margin:0}main{max-width:640px;margin:0 auto;padding:48px 32px 40px}
-    header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding-bottom:28px}
+    :root{color-scheme:dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e5e5e5;background:#191919;--line:#383838;--accent:#b8c9b0}
+    *{box-sizing:border-box;border-radius:0}body{margin:0}main{max-width:600px;margin:0 auto;padding:28px 28px 24px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding-bottom:20px}
     h1{font-size:25px;font-weight:500;letter-spacing:-1px;margin:7px 0 0}h2{font-size:12px;font-weight:500;margin:0;color:#b0b0b0}
     p{margin:8px 0;color:#aaa}.intro{font-size:12px;margin:9px 0 0;color:#999}.version{font:10px/1.5 ui-monospace,SFMono-Regular,monospace;letter-spacing:1.8px;color:#8d8d8d}
-    section{padding:24px 0;border-top:1px solid var(--line)}.line{display:flex;align-items:center;justify-content:space-between;gap:16px}
-    label{display:block;font-size:12px;color:#bcbcbc}.muted{font-size:11px;color:#919191}
-    [hidden]{display:none!important}.section-label{margin-bottom:12px}.sound-row{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:8px;align-items:start}
-    .select-wrap{position:relative;min-width:0}.select-display{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#262626;border-bottom:1px solid #777;cursor:pointer;min-height:48px}
-    .select-display:hover{background:#2d2d2d}#preset-current{padding:12px 14px;min-width:0;overflow-wrap:anywhere;font-size:14px}
-    #preset-trigger{height:47px;width:44px;border:0;background:transparent;color:#bcbcbc}
-    #preset-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;max-height:330px;overflow-y:auto;overscroll-behavior:contain;background:#292929;border:1px solid #666;padding:4px 0;box-shadow:0 12px 24px #0005}
-    .preset-option{min-height:42px;padding:11px 14px;cursor:pointer;border-left:2px solid transparent;outline-offset:-2px;font-size:13px}
-    .preset-option:hover,.preset-option:focus{background:#393939;outline:1px solid #b8c9b0}.preset-option[aria-selected=true]{border-left-color:var(--accent);background:#353a33;color:#e5eedf}
-    .preset-separator{height:1px;background:#484848;margin:5px 14px}
+    section{padding:18px 0;border-top:1px solid var(--line)}.line{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    label,.section-label{display:block;font-size:12px;font-weight:400;color:#bcbcbc}.muted{font-size:11px;color:#919191}
+    [hidden]{display:none!important}.section-label{margin:0}.sound-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px}
+    .select-wrap{min-width:0}
+    #preset-list{background:transparent;border:0;padding:0}
+    .preset-option{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;padding:10px 12px;cursor:pointer;border-left:2px solid transparent;outline-offset:-2px;font-size:13px}
+    .preset-option:hover{background:#252525}.preset-option:focus-visible{background:#393939;outline:1px solid #b8c9b0}.preset-option[aria-selected=true]{border-left-color:var(--accent);background:#2d342b;color:#e5eedf}
+    .preset-loading{visibility:hidden;width:18px;height:18px}.preset-option[aria-busy=true] .preset-loading{visibility:visible}
+    .preset-separator{height:1px;background:#353535;margin:5px 12px}
     svg{width:18px;height:18px;display:block;flex-shrink:0}
     button{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:40px;height:40px;padding:10px;border:1px solid transparent;background:transparent;color:#d3d3d3;cursor:pointer}
     button:hover{background:#353535;border-color:#646464}button:active{background:#464646}button:disabled{color:#616161;cursor:default;background:transparent;border-color:transparent}
     #close{width:32px;height:32px;padding:7px;margin-top:1px;color:#999}
-    #preview{width:48px;height:48px;background:var(--accent);border:1px solid var(--accent);color:#1b2118}#preview svg{width:20px;height:20px}#preview:hover{background:#cedbc8}#preview:active{background:#a1b399}
-    button:focus-visible,input:focus-visible,.select-display:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-    .enabled-row{padding:17px 0}.enabled-row label{color:#ddd}.enable-control{display:flex;align-items:center;justify-content:center;width:48px;min-height:44px;cursor:pointer}
-    input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;flex-shrink:0;width:44px;height:24px;margin:0;background:#303030;border:1px solid #676767;cursor:pointer}
-    input[type=checkbox]:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;background:#969696;transition:transform 100ms ease,background-color 100ms ease}
-    input[type=checkbox]:checked{background:#3d4936;border-color:#a4b49c}input[type=checkbox]:checked:after{transform:translateX(20px);background:var(--accent)}
-    .enable-control:hover input{border-color:#c2c2c2}.enable-control:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:3px}.enable-control input:focus-visible{outline:none}
-    @media(prefers-reduced-motion:reduce){input[type=checkbox]:after{transition:none}}
+    button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
     .volume-head{margin-bottom:10px}output{font:20px/1.2 ui-monospace,SFMono-Regular,monospace;font-variant-numeric:tabular-nums;letter-spacing:-1px;color:#dce5d7}
     input[type=range]{appearance:none;-webkit-appearance:none;width:100%;height:28px;background:transparent;margin:0;cursor:pointer}
     input[type=range]::-webkit-slider-runnable-track{height:4px;background:#515151}input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:9px;height:20px;margin-top:-8px;background:var(--accent);border:1px solid #d2dccb}
     input[type=range]::-moz-range-track{height:4px;background:#515151}input[type=range]::-moz-range-thumb{width:7px;height:18px;background:var(--accent);border:1px solid #d2dccb;border-radius:0}
     .scale{display:flex;justify-content:space-between;margin-top:3px;font:9px/1.3 ui-monospace,SFMono-Regular,monospace;letter-spacing:.5px;color:#777}.scale span{position:relative;padding-top:7px}.scale span:before{content:"";position:absolute;top:0;left:50%;height:3px;width:1px;background:#575757}
-    .actions{display:flex;align-items:center;gap:4px}.upload-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center}.file-copy{min-width:0}#file-name{font-size:12px;margin:8px 0 4px;color:#aaa;overflow-wrap:anywhere}.file-limit{margin:0;font:10px/1.5 ui-monospace,SFMono-Regular,monospace;color:#777}
-    .upload-row .actions button{background:#272727;border-color:#424242}.upload-row .actions button:hover{background:#393939;border-color:#777}.upload-row .actions button:disabled{background:transparent;border-color:#303030}
-    #status{min-height:18px;font-size:11px;color:#aebca7;overflow-wrap:anywhere;margin:12px 0 20px}
-    .diagnostic-section{padding:15px 0 0}.diagnostic-head{display:flex;align-items:center;justify-content:space-between;gap:16px}#background-test{width:32px;height:32px;padding:7px;color:#aaa}#diagnostics{overflow-wrap:anywhere;line-height:1.8;margin:8px 0}.test-hint{margin:8px 0 0;font-size:10px;color:#777}
-    @media(max-width:420px){main{padding:28px 20px 30px}header{gap:8px;padding-bottom:22px}h1{font-size:23px}.sound-row{grid-template-columns:minmax(0,1fr) 48px;gap:6px}#preview{width:48px}.upload-row{gap:8px}}
-    @media(forced-colors:active){input[type=checkbox]{appearance:auto}input[type=range]{appearance:auto}button{border-color:ButtonText}svg{stroke:ButtonText}}
+    #status{min-height:18px;font-size:11px;color:#aebca7;overflow-wrap:anywhere;margin:4px 0 12px}
+    .diagnostic-section{padding:0;border-top:1px solid var(--line)}
+    .diagnostic-section summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;cursor:pointer;list-style:none;color:#999;font-size:11px}
+    .diagnostic-section summary::-webkit-details-marker{display:none}.diagnostic-section summary:hover{color:#d7dfd2}.diagnostic-section summary:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+    .diagnostic-section summary svg{width:16px;height:16px}.diagnostic-section[open] summary svg{transform:rotate(180deg)}
+    .diagnostic-body{padding:0 0 12px}.diagnostic-tools{display:flex;justify-content:flex-end}
+    #background-test{width:32px;height:32px;padding:7px;color:#aaa}#diagnostics{overflow-wrap:anywhere;line-height:1.8;margin:0 0 8px}.test-hint{margin:4px 0 0;font-size:10px;color:#777}
+    @media(max-width:420px){main{padding:24px 20px 24px}header{gap:8px;padding-bottom:18px}h1{font-size:23px}}
+    @media(forced-colors:active){input[type=range]{appearance:auto}button{border-color:ButtonText}svg{stroke:ButtonText}}
   </style>`);
   document.body.innerHTML = `<main>
     <header>
-      <div><span class="version">SOUND / 1.37.0</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
+      <div><span class="version">SOUND / 1.45.1</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
       ${iconButton('close', 'close', '설정창 닫기')}
     </header>
-    <section class="line enabled-row"><label for="enabled">알림음 사용</label><label class="enable-control" for="enabled" aria-label="알림음 사용"><input id="enabled" type="checkbox" role="switch" aria-label="알림음 사용"></label></section>
-    <section>
-      <label id="preset-label" class="section-label" for="preset-trigger">알림음 선택</label>
-      <div class="sound-row"><div class="select-wrap" id="preset-wrap">
-        <input id="preset" type="hidden">
-        <div class="select-display" id="preset-display"><span id="preset-current"></span><button id="preset-trigger" type="button" aria-label="알림음 선택 목록 열기" title="알림음 선택" aria-haspopup="listbox" aria-controls="preset-list" aria-expanded="false">${svg('down')}</button></div>
-        <div id="preset-list" role="listbox" aria-labelledby="preset-label" hidden>
-          ${presetGroups.map((group, index) => (index ? `<div id="preset-separator-${index}" class="preset-separator" role="presentation" aria-hidden="true"></div>` : '') + group.map(([value, label]) => `<div id="preset-option-${value}" class="preset-option" role="option" tabindex="-1" aria-selected="false">${label}</div>`).join('')).join('')}
-        </div>
-      </div>
-      ${iconButton('preview', 'play', '미리듣기 / 소리 활성화')}</div>
-    </section>
     <section>
       <div class="line volume-head"><label for="volume">음량</label><output id="volume-value" for="volume">40%</output></div>
       <input id="volume" type="range" min="0" max="100" step="1" aria-label="알림음 음량">
       <div class="scale" aria-hidden="true"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
     </section>
-    <section class="upload-row">
-      <div class="file-copy"><label for="file">내 음원</label><p id="file-name" class="muted"></p><p class="file-limit">3 MiB / 30초 이하</p></div>
-      <div class="actions">${iconButton('upload', 'upload', '내 음원 파일 불러오기')}${iconButton('remove', 'remove', '내 음원 삭제')}</div>
-      <input id="file" type="file" hidden accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac">
+    <section>
+      <div class="sound-head"><span id="preset-label" class="section-label">알림음 선택</span></div>
+      <div class="select-wrap" id="preset-wrap">
+        <input id="preset" type="hidden">
+        <div id="preset-list" role="listbox" aria-labelledby="preset-label">
+          ${presetGroups.map((group, index) => (index ? `<div id="preset-separator-${index}" class="preset-separator" role="presentation" aria-hidden="true"></div>` : '') + group.map(([value, label]) => `<div id="preset-option-${value}" class="preset-option" role="option" tabindex="-1" aria-selected="false">${label}<span class="preset-loading" aria-hidden="true">${svg('loading')}</span></div>`).join('')).join('')}
+        </div>
+      </div>
     </section>
     <p id="status" role="status" aria-live="polite"></p>
-    <section class="diagnostic-section">
-      <div class="diagnostic-head"><h2>재생 진단</h2>${iconButton('background-test', 'test', '설정창 닫고 3초 뒤 시험 재생')}</div>
-      <p id="diagnostics" class="muted"></p>
-      <p class="test-hint">타이머로 시험 재생 · 3초 뒤 결과 확인</p>
-    </section>
+    <details id="diagnostic-panel" class="diagnostic-section">
+      <summary>재생 진단${svg('down')}</summary>
+      <div class="diagnostic-body">
+        <p id="diagnostics" class="muted"></p>
+        <div class="diagnostic-tools">${iconButton('background-test', 'test', '설정창 닫고 3초 뒤 시험 재생')}</div>
+        <p class="test-hint">타이머로 시험 재생 · 3초 뒤 결과 확인</p>
+      </div>
+    </details>
   </main>`;
   const elements = new Map();
   const $ = (id) => {
@@ -144,18 +129,12 @@
     return elements.get(id);
   };
   let diagnosticText = '';
-  let loadingCount = 0;
-  function previewLoading(loading) {
-    const wasLoading = loadingCount > 0;
-    loadingCount = Math.max(0, loadingCount + (loading ? 1 : -1));
-    const busy = loadingCount > 0;
-    if (disposed || busy === wasLoading) return;
-    const button = $('preview');
-    button.innerHTML = svg(busy ? 'loading' : 'play');
-    button.disabled = busy;
-    button.setAttribute('aria-busy', String(busy));
-    button.setAttribute('aria-label', busy ? '음원 불러오는 중' : '미리듣기 / 소리 활성화');
-    button.title = busy ? '음원 불러오는 중' : '미리듣기 / 소리 활성화';
+  let previewSequence = 0;
+  let loadingPreset = null;
+  function previewLoading(preset) {
+    if (loadingPreset) $('preset-option-' + loadingPreset).setAttribute('aria-busy', 'false');
+    loadingPreset = preset;
+    if (preset) $('preset-option-' + preset).setAttribute('aria-busy', 'true');
   }
   function diagnostics() {
     const text = `완료 신호 연결: ${listenerReady ? '요청 완료 · 수신 횟수 확인' : '미연결'} / 수신 ${outputCount}회 / 최근 수신: ${lastOutput} / 오디오: ${context?.state || '미생성'} / 최근 재생: ${lastResult}`;
@@ -168,16 +147,14 @@
   }
   function errorText(error) { return error?.message || String(error); }
   function render() {
-    $('enabled').checked = settings.enabled;
     $('volume').value = settings.volume;
     $('volume-value').textContent = `${settings.volume}%`;
     $('preset').value = settings.preset;
     renderPreset();
-    $('file-name').textContent = settings.fileName ? `저장된 음원: ${settings.fileName}` : '파일을 불러와 내 음원 추가';
-    $('remove').disabled = !settings.fileData || fileBusy;
   }
   function save() {
-    const snapshot = { ...settings };
+    if (storageReadFailed) return Promise.reject(new Error('설정 읽기 실패 · 앱을 다시 열어 재시도'));
+    const snapshot = { volume: settings.volume, preset: settings.preset };
     queue = queue.catch(() => {}).then(() => api.pluginStorage.setItem(KEY, snapshot));
     return queue;
   }
@@ -200,16 +177,20 @@
       if (!unlocked) throw new Error('자동 재생 차단 · 재생을 눌러 활성화');
     });
   }
-  function activateAutomatically() {
-    if (disposed || !settings.enabled || (unlocked && context?.state === 'running')) return;
+  function activateAutomatically(event) {
+    // Picking a sound must not wake audio hardware or repeat activation attempts.
+    if (event?.target?.closest?.('#preset-wrap')) return;
+    if (disposed || activationPending || (unlocked && context?.state === 'running')) return;
     // Never emit a test sound, block chat, or replay a missed notification later.
     try {
+      activationPending = true;
       void unlock().catch(() => {
         if (disposed) return;
         lastResult = '자동 활성화 대기 · 필요 시 재생을 눌러 활성화';
         diagnostics();
-      });
+      }).finally(() => { activationPending = false; });
     } catch (error) {
+      activationPending = false;
       if (!disposed) { lastResult = errorText(error); diagnostics(); }
     }
   }
@@ -223,72 +204,6 @@
     active.add(source);
     source.onended = () => { active.delete(source); source.disconnect(); gain.disconnect(); };
   }
-  // Same short-effect metric used to master the built-ins; silence remains silence.
-  async function normalizeCustomBuffer(audio) {
-    if (audio.duration > 30) throw new Error('30초 이하 음원 선택');
-    const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
-    const frame = Math.max(1, Math.round(audio.sampleRate * 0.05));
-    const alpha = Math.exp(-2 * Math.PI * 80 / audio.sampleRate);
-    const beta = Math.exp(-2 * Math.PI * 1500 / audio.sampleRate);
-    const ceiling = 0.97;
-    const powers = new Float64Array(Math.ceil(audio.length / frame));
-    let peak = 0;
-    async function measure(gain = 1, limited = false) {
-      powers.fill(0);
-      for (const channel of channels) {
-        let xp = 0, yp = 0, sp = 0, hp = 0, sum = 0;
-        for (let i = 0; i < channel.length; i++) {
-          if (!limited) peak = Math.max(peak, Math.abs(channel[i]));
-          const x = limited ? ceiling * Math.tanh(channel[i] * gain / ceiling) : channel[i] * gain;
-          const y = alpha * (yp + x - xp);
-          const h = beta * (hp + y - sp);
-          const weighted = y + 0.5848931925 * h;
-          xp = x; yp = y; sp = y; hp = h;
-          sum += weighted * weighted;
-          if ((i + 1) % frame === 0 || i + 1 === channel.length) {
-            powers[Math.floor(i / frame)] += sum / (i % frame + 1) / channels.length;
-            sum = 0;
-          }
-          // Yield only for long uploads; preserve filter state and exact sample arithmetic.
-          if ((i + 1) % 131072 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0));
-            if (disposed) throw new Error('플러그인 종료');
-          }
-        }
-      }
-      let maximum = 0;
-      for (const power of powers) maximum = Math.max(maximum, power);
-      const threshold = Math.max(maximum * 0.01, 1e-10);
-      let sum = 0, count = 0;
-      for (const power of powers) if (power > threshold) { sum += power; count++; }
-      return count ? Math.sqrt(sum / count) : 0;
-    }
-    const original = await measure();
-    if (original < 1e-8) return audio;
-    let gain = REFERENCE_VOLUME / original;
-    const limited = peak * gain > ceiling;
-    if (limited) {
-      let lo = 0, hi = Math.max(1, gain);
-      // A finite cap avoids amplifying almost silent recordings without bound.
-      while (hi < 1024 && await measure(hi, true) < REFERENCE_VOLUME) hi *= 2;
-      for (let i = 0; i < 18; i++) {
-        const mid = (lo + hi) / 2;
-        if (await measure(mid, true) < REFERENCE_VOLUME) lo = mid; else hi = mid;
-      }
-      gain = (lo + hi) / 2;
-    }
-    for (const channel of channels) {
-      for (let i = 0; i < channel.length; i++) {
-        channel[i] = limited ? ceiling * Math.tanh(channel[i] * gain / ceiling) : channel[i] * gain;
-        if ((i + 1) % 131072 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-          if (disposed) throw new Error('플러그인 종료');
-        }
-      }
-    }
-    return audio;
-  }
-
   function fadeTail(audio, fadeMs) {
     if (!fadeMs) return audio;
     const frames = Math.min(Math.round(audio.sampleRate * fadeMs / 1000), Math.floor(audio.length * 0.3));
@@ -299,9 +214,38 @@
     }
     return audio;
   }
-  async function decodeData(data, normalize = false, fadeMs = 0) {
-    previewLoading(true);
-    try {
+  // Embedded recordings are uncompressed 16-bit PCM WAV. Read them directly,
+  // avoiding a native decodeAudioData job; the original MP3 keeps that fallback.
+  function pcmWaveBuffer(bytes) {
+    if (bytes.byteLength < 12) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (view.getUint32(0) !== 0x52494646 || view.getUint32(8) !== 0x57415645) return null;
+    let format = null, dataOffset = 0, dataSize = 0;
+    for (let offset = 12; offset + 8 <= view.byteLength;) {
+      const tag = view.getUint32(offset);
+      const size = view.getUint32(offset + 4, true);
+      const start = offset + 8;
+      if (size > view.byteLength - start) return null;
+      if (tag === 0x666d7420 && size >= 16) {
+        format = { code: view.getUint16(start, true), channels: view.getUint16(start + 2, true),
+          rate: view.getUint32(start + 4, true), align: view.getUint16(start + 12, true), bits: view.getUint16(start + 14, true) };
+      } else if (tag === 0x64617461 && !dataOffset) { dataOffset = start; dataSize = size; }
+      if (format && dataOffset) break;
+      offset = start + size + (size & 1);
+    }
+    if (!format || !dataOffset || !dataSize || format.code !== 1 || format.bits !== 16 ||
+        format.channels < 1 || format.channels > 8 || format.rate < 8000 || format.rate > 192000 ||
+        format.align !== format.channels * 2 || dataSize % format.align !== 0) return null;
+    const frames = dataSize / format.align;
+    const audio = context.createBuffer(format.channels, frames, format.rate);
+    for (let channel = 0; channel < format.channels; channel++) {
+      const samples = audio.getChannelData(channel);
+      let offset = dataOffset + channel * 2;
+      for (let i = 0; i < frames; i++, offset += format.align) samples[i] = view.getInt16(offset, true) / 32768;
+    }
+    return audio;
+  }
+  async function decodeData(data, fadeMs = 0) {
     const base64 = data.split(',')[1];
     let bytes;
     if (typeof Uint8Array.fromBase64 === 'function') bytes = Uint8Array.fromBase64(base64);
@@ -310,10 +254,9 @@
       bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     }
-    const audio = await context.decodeAudioData(bytes.buffer);
+    const audio = pcmWaveBuffer(bytes) || await context.decodeAudioData(bytes.buffer);
     if (disposed) throw new Error('플러그인 종료');
-    return fadeTail(normalize ? await normalizeCustomBuffer(audio) : audio, fadeMs);
-    } finally { previewLoading(false); }
+    return fadeTail(audio, fadeMs);
   }
   function releaseDecoded() {
     cacheGeneration++;
@@ -325,9 +268,9 @@
     if (pendingDecode?.preset === preset && pendingDecode.data === data) return pendingDecode.promise;
     const generation = cacheGeneration;
     const request = { preset, data, promise: null };
-    const fadeMs = preset === 'custom' ? 180 : preset === 'risu' ? 120 : preset === 'page_forward' ? 180 : 0;
-    request.promise = decodeData(data, preset === 'custom', fadeMs).then(audio => {
-      const currentData = preset === 'custom' ? settings.fileData : builtinAudio[preset];
+    const fadeMs = preset === 'risu' ? 120 : preset === 'page_forward' ? 180 : 0;
+    request.promise = decodeData(data, fadeMs).then(audio => {
+      const currentData = builtinAudio[preset];
       if (!disposed && generation === cacheGeneration && settings.preset === preset && currentData === data) {
         selectedCache = { preset, data, audio };
       }
@@ -337,7 +280,7 @@
     return request.promise;
   }
   async function play(preview = false) {
-    if (disposed || (!preview && !settings.enabled) || settings.volume === 0) return;
+    if (disposed || settings.volume === 0) return;
     if (!context || !unlocked) await unlock();
     if (disposed) return;
     // WebKit may suspend an already activated context while the iframe is hidden.
@@ -346,16 +289,9 @@
     const selectedPreset = settings.preset;
     const generation = cacheGeneration;
     let decoded = null;
-    if (settings.preset === 'custom') {
-      if (!settings.fileData) throw new Error('내 음원 파일 불러오기');
-      const data = settings.fileData;
-      decoded = await selectedBuffer(selectedPreset, data);
-      if (disposed || data !== settings.fileData) return;
-    } else if (builtinAudio[selectedPreset]) {
-      decoded = await selectedBuffer(selectedPreset, builtinAudio[selectedPreset]);
-    }
+    if (builtinAudio[selectedPreset]) decoded = await selectedBuffer(selectedPreset, builtinAudio[selectedPreset]);
     if (generation !== cacheGeneration || selectedPreset !== settings.preset) return;
-    if (disposed || (!preview && !settings.enabled) || settings.volume === 0) return;
+    if (disposed || settings.volume === 0) return;
     stop();
     const now = context.currentTime;
     const volume = settings.volume / 100;
@@ -383,31 +319,15 @@
       source.connect(gain).connect(context.destination);
       track(source, gain);
       source.start();
-      lastResult = `${builtinNames[selectedPreset] || '사용자 음원'} 재생 요청 성공`;
+      lastResult = `${builtinNames[selectedPreset] || '알림음'} 재생 요청 성공`;
       diagnostics();
       return;
     }
     throw new Error('알림음 다시 선택');
   }
-  function readFile(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('파일 읽기 실패 · 파일 다시 선택'));
-      reader.readAsDataURL(file);
-    });
-  }
-  $('upload').onclick = () => $('file').click();
   $('close').onclick = () => {
-    closePresetMenu();
     stop();
     void api.hideContainer().catch((error) => status(errorText(error)));
-  };
-  $('enabled').onchange = () => {
-    settings.enabled = $('enabled').checked;
-    if (!settings.enabled) stop();
-    else activateAutomatically();
-    persist();
   };
   $('volume').oninput = () => {
     settings.volume = Number($('volume').value);
@@ -415,54 +335,42 @@
     stop();
   };
   $('volume').onchange = persist;
-  let menuOpen = false;
+  let renderedPreset = null;
   function renderPreset() {
-    $('preset-current').textContent = presetItems.find(([value]) => value === settings.preset)?.[1] || builtinNames.risu;
-    for (const [value] of presetItems) {
-      $('preset-option-' + value).setAttribute('aria-selected', String(value === settings.preset));
+    if (renderedPreset === settings.preset) return;
+    if (renderedPreset) {
+      $('preset-option-' + renderedPreset).setAttribute('aria-selected', 'false');
+      $('preset-option-' + renderedPreset).setAttribute('tabindex', '-1');
     }
-  }
-  function closePresetMenu(restoreFocus = false) {
-    menuOpen = false;
-    $('preset-list').hidden = true;
-    $('preset-trigger').setAttribute('aria-expanded', 'false');
-    if (restoreFocus) $('preset-trigger').focus();
+    $('preset-option-' + settings.preset).setAttribute('aria-selected', 'true');
+    $('preset-option-' + settings.preset).setAttribute('tabindex', '0');
+    renderedPreset = settings.preset;
   }
   function focusPreset(index) {
     const available = availablePresetItems();
     const value = available[(index + available.length) % available.length][0];
     $('preset-option-' + value).focus();
   }
-  function openPresetMenu(last = false) {
-    menuOpen = true;
-    $('preset-list').hidden = false;
-    $('preset-trigger').setAttribute('aria-expanded', 'true');
-    const available = availablePresetItems();
-    const selected = available.findIndex(([value]) => value === settings.preset);
-    focusPreset(last ? available.length - 1 : Math.max(0, selected));
-  }
   $('preset').onchange = () => {
     const nextPreset = $('preset').value;
-    if (nextPreset !== settings.preset) releaseDecoded();
+    if (!Object.prototype.hasOwnProperty.call(builtinAudio, nextPreset) || nextPreset === settings.preset) return;
+    releaseDecoded();
     settings.preset = nextPreset;
     renderPreset(); stop(); persist();
   };
-  const togglePresetMenu = () => { if (menuOpen) closePresetMenu(true); else openPresetMenu(); };
-  $('preset-display').onclick = togglePresetMenu;
-  $('preset-trigger').onclick = (event) => { event.stopPropagation(); togglePresetMenu(); };
-  $('preset-trigger').onkeydown = (event) => {
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault();
-      openPresetMenu(event.key === 'End');
-      if (event.key === 'Home') focusPreset(0);
-    } else if (event.key === 'Escape') closePresetMenu();
-  };
   for (const [value] of presetItems) {
     const option = $('preset-option-' + value);
-    const choose = () => { $('preset').value = value; $('preset').onchange(); closePresetMenu(true); };
+    const choose = () => {
+      if (disposed || loadingPreset === value) return;
+      // Activate audio in the original click/keyboard gesture, before storage work.
+      let ready;
+      try { ready = unlock(); } catch (error) { status(errorText(error)); return; }
+      $('preset').value = value; $('preset').onchange();
+      previewSelected(value, ready);
+    };
     option.onclick = choose;
     option.onkeydown = (event) => {
-      if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' ', 'Escape'].includes(event.key)) event.preventDefault();
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].includes(event.key)) event.preventDefault();
       const available = availablePresetItems();
       const index = available.findIndex(([key]) => key === value);
       if (event.key === 'ArrowDown') focusPreset(index + 1);
@@ -470,24 +378,23 @@
       else if (event.key === 'Home') focusPreset(0);
       else if (event.key === 'End') focusPreset(available.length - 1);
       else if (event.key === 'Enter' || event.key === ' ') choose();
-      else if (event.key === 'Escape') closePresetMenu(true);
-      else if (event.key === 'Tab') { event.preventDefault(); closePresetMenu(); $(event.shiftKey ? 'preset-trigger' : 'preview').focus(); }
+
     };
   }
-  document.addEventListener('pointerdown', (event) => { if (!$('preset-wrap').contains(event.target)) closePresetMenu(); });
-  document.addEventListener('focusin', (event) => { if (!$('preset-wrap').contains(event.target)) closePresetMenu(); });
-  $('preview').onclick = () => {
-    if (disposed || $('preview').disabled) return;
-    previewLoading(true);
-    // Resume before any asynchronous storage or RPC call can consume the user gesture.
-    let ready;
-    try { ready = unlock(); }
-    catch (error) { previewLoading(false); status(errorText(error)); return; }
-    void ready.then(() => play(true)).then(() => {
-      if (!disposed) status(settings.volume === 0 ? '음량을 올려 소리 확인' : '활성화 완료 · 답변을 받아 알림 확인');
-    }).catch((error) => { if (!disposed) status(`재생 실패: ${errorText(error)}`); })
-      .finally(() => previewLoading(false));
-  };
+  function previewSelected(preset, ready) {
+    const sequence = ++previewSequence;
+    previewLoading(preset);
+    void ready.then(() => {
+      if (disposed || sequence !== previewSequence || preset !== settings.preset) return;
+      return play(true);
+    }).then(() => {
+      if (!disposed && sequence === previewSequence) status(settings.volume === 0 ? '음량을 올려 소리 확인' : '미리듣기 완료 · 답변으로 알림 확인');
+    }).catch((error) => {
+      if (!disposed && sequence === previewSequence) status(`재생 실패: ${errorText(error)}`);
+    }).finally(() => {
+      if (!disposed && sequence === previewSequence) previewLoading(null);
+    });
+  }
   $('background-test').onclick = () => {
     let ready;
     try { ready = unlock(); } catch (error) { status(errorText(error)); return; }
@@ -502,59 +409,11 @@
       await api.hideContainer();
     }).catch((error) => status(errorText(error)));
   };
-  $('file').onchange = async () => {
-    const file = $('file').files[0];
-    if (!file || fileBusy) return;
-    fileBusy = true;
-    $('file').disabled = true;
-    $('upload').disabled = true;
-    $('remove').disabled = true;
-    try {
-      if (file.size === 0 || file.size > MAX_BYTES) throw new Error('0바이트 초과·3 MiB 이하 파일 선택');
-      // Release the prior PCM before decoding a replacement upload.
-      stop();
-      releaseDecoded();
-      // Validate bytes with the actual decoder instead of trusting extension/MIME.
-      await unlock();
-      const data = await readFile(file);
-      const candidate = await decodeData(data, true, 180);
-      if (candidate.duration > 30) throw new Error('30초 이하 음원 선택');
-      stop();
-      const previous = { ...settings };
-      releaseDecoded();
-      settings = { ...settings, preset: 'custom', fileName: file.name, fileData: data };
-      selectedCache = { preset: 'custom', data, audio: candidate };
-      try { await save(); }
-      catch (error) {
-        settings = { ...settings, preset: previous.preset, fileName: previous.fileName, fileData: previous.fileData };
-        releaseDecoded();
-        throw error;
-      }
-      status('음원 저장 완료 · 재생을 눌러 확인');
-    } catch (error) {
-      status(`음원 불러오기 실패: ${errorText(error)}`);
-    } finally {
-      fileBusy = false;
-      $('file').value = '';
-      $('file').disabled = false;
-      $('upload').disabled = false;
-      render();
-    }
-  };
-  $('remove').onclick = async () => {
-    const previous = { ...settings };
-    stop();
-    settings = { ...settings, fileName: '', fileData: '', preset: settings.preset === 'custom' ? 'risu' : settings.preset };
-    try { await save(); releaseDecoded(); status('음원 삭제 완료'); }
-    catch (error) { settings = { ...settings, fileName: previous.fileName, fileData: previous.fileData, preset: previous.preset }; status(`삭제 저장 실패: ${errorText(error)}`); }
-    render();
-  };
   const onOutput = ({ chat, messageIndex }) => {
     if (disposed) return;
     outputCount++;
     lastOutput = new Date().toLocaleTimeString();
     diagnostics();
-    if (!settings.enabled) { lastResult = '알림음 사용 꺼짐'; diagnostics(); return; }
     const message = chat?.message?.[messageIndex];
     if (!message || message.role !== 'char' || typeof message.data !== 'string' || !message.data.trim()) {
       lastResult = '완료 신호 수신, 재생 가능한 AI 메시지 없음'; diagnostics(); return;
@@ -566,17 +425,13 @@
   try {
     const saved = await api.pluginStorage.getItem(KEY);
     if (saved && typeof saved === 'object') {
-      settings.enabled = typeof saved.enabled === 'boolean' ? saved.enabled : defaults.enabled;
       settings.volume = Number.isFinite(saved.volume) ? Math.min(100, Math.max(0, saved.volume)) : defaults.volume;
       // Preserve previous keyboard selections; removed sounds fall back to the default.
       const migratedPreset = { page_heavy: 'page_forward', page_book: 'page_forward', typing_soft: 'typing_light', typing_mechanical: 'typing', typing_fast: 'typing' }[saved.preset] || saved.preset;
-      settings.preset = ['custom', ...Object.keys(builtinAudio)].includes(migratedPreset) ? migratedPreset : defaults.preset;
-      if (typeof saved.fileData === 'string' && saved.fileData.startsWith('data:') && saved.fileData.length <= MAX_BYTES * 1.4 + 256) {
-        settings.fileData = saved.fileData;
-        settings.fileName = typeof saved.fileName === 'string' ? saved.fileName : '내 음원';
-      }
+      settings.preset = Object.keys(builtinAudio).includes(migratedPreset) ? migratedPreset : defaults.preset;
+
     }
-  } catch (error) { startupError = `설정 읽기 실패: ${errorText(error)}`; }
+  } catch (error) { storageReadFailed = true; startupError = `설정 읽기 실패: ${errorText(error)}`; }
   render();
   await api.registerSetting('메시지 알림음 조절', async () => {
     render();

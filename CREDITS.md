@@ -1,10 +1,10 @@
 # 라이선스 및 음원 출처
 
-대상: 메시지 알림음 조절 플러그인 v1.37.0
+대상: 메시지 알림음 조절 플러그인 v1.45.1
 
 ## 플러그인 코드
 
-플러그인 코드 및 포함된 DSP 스크립트: **GPL-3.0-only**.
+플러그인 코드 및 제작에 사용한 DSP 스크립트: **GPL-3.0-only**.
 라이선스 전문은 함께 배포하는 `LICENSE`를 참고하세요.
 음원별 조건은 아래와 같이 별도로 적용됩니다. 플러그인 전체가 CC0인 것은 아닙니다.
 
@@ -42,17 +42,16 @@ CC0 조건: https://creativecommons.org/publicdomain/zero/1.0/
 Freesound 음원은 공개 HQ MP3 미리듣기 파일을 가공했습니다. 로그인이 필요한 원본 다운로드 파일을 사용했다는 의미는 아닙니다.
 외부 녹음본은 플러그인 안에 포함되며, 재생 시 외부 서버에서 음원을 내려받지 않습니다.
 
-## 아이콘 및 사용자 음원
+## 아이콘
 
-- UI 아이콘은 플러그인 코드에 직접 작성한 인라인 SVG이며, 코드와 같은 GPL-3.0-only로 제공합니다.
-- 사용자가 직접 불러오는 음원은 이 출처 목록에 포함되지 않습니다. 해당 음원의 이용 조건은 사용자가 확인해야 합니다.
+UI 아이콘은 플러그인 코드에 직접 작성한 인라인 SVG이며, 코드와 같은 GPL-3.0-only로 제공합니다.
 
-## Update distribution
+## 배포 및 업데이트
 
-Version 1.36.0 adds the update URL https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js. All audio and playback behavior unchanged.
+현재 버전: v1.45.1. 사용자 음원 업로드·삭제·저장·정규화 기능을 제거했습니다. 기본 제공 음원의 데이터·재생 음량·피치·페이드는 유지합니다.
 
-Version 1.36.1 adds an SVG ellipsis busy state to the preview button during activation/decoding and restores it on success or failure. No sound or licensing changes.
+업데이트 주소: https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 
-Version 1.36.2 silently preloads only the currently selected alert and enable-switch click after successful audio activation, using one deferred idle job (with a one-shot timer fallback). Selection changes coalesce; custom audio is normalized and cached; switch notification and control share a decoded buffer. Warmup never plays audio, does not block the chat listener or disable preview, and failures remain retryable. Audio bytes, gains, pitch, fades, and license terms unchanged.
+Version 1.45.1 reads embedded 16-bit PCM WAV recordings directly into AudioBuffers, avoiding decodeAudioData for these files. Original encoded audio bytes/gains and pitch/sequence settings unchanged. Buffers retain source sample rate; Web Audio resamples during playback if needed, rather than pre-resampling in decodeAudioData. PCM samples were compared against libsndfile references (maximum difference 1e-7, including runtime fades). The RisuAI MP3 retains native decoding. Actual hardware output is not claimed bit-identical or verified lag-free.
 
-Version 1.37.0 removes enable-switch control audio and all preloading. Only one selected decoded audio buffer is cached, invalidated on selection changes. Switch notification stays available, with the same two-click pitch/gain/gap. Background recordings, audio bytes, and licenses unchanged. Native decoding and upload validation may temporarily allocate additional memory while processing; embedded compressed audio strings remain available for the preset list.
+현재 UI는 펼친 알림음 목록에서 항목을 누르면 선택·저장하고 미리듣기를 재생합니다. 별도 재생 버튼과 알림음 사용 ON/OFF는 없으며, 음량 0%로 음소거합니다. 재생 진단은 기본 접힘 상태입니다. 음원 데이터와 음량·피치·페이드 설정은 유지했습니다.
