@@ -1,6 +1,6 @@
 //@name risu_message_sound
 //@api 3.0
-//@version 1.45.2
+//@version 1.45.3
 //@update-url https://raw.githubusercontent.com/zacha-log/risu-message-sound/main/risu-message-sound.js
 //@display-name 메시지 알림음 조절
 
@@ -96,7 +96,7 @@
   </style>`);
   document.body.innerHTML = `<main>
     <header>
-      <div><span class="version">SOUND / 1.45.2</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
+      <div><span class="version">SOUND / 1.45.3</span><h1>메시지 알림음</h1><p class="intro">사용 전 RisuAI 기본 알림음 끄기</p></div>
       ${iconButton('close', 'close', '설정창 닫기')}
     </header>
     <section>
@@ -281,7 +281,7 @@
   }
   async function play(preview = false) {
     if (disposed || settings.volume === 0) return;
-    if (!context || !unlocked) await unlock();
+    if (!context || context.state === 'closed' || !unlocked) await unlock();
     if (disposed) return;
     // WebKit may suspend an already activated context while the iframe is hidden.
     if (context.state !== 'running') await withTimeout(context.resume(), 2500, `오디오 재개 실패 (${context.state}) · 재생을 눌러 소리 재활성화`);
